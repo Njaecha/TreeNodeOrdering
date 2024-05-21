@@ -184,8 +184,6 @@ namespace TreeNodeOrdering
 
         }
 
-        float testFactor = 0.001f;
-
         IEnumerator DoDragging(StartDragEventArgs e)
         {
             int hoveredIndex = 0;
@@ -478,7 +476,7 @@ namespace TreeNodeOrdering
             }
         }
 
-        public class StartDragEventArgs
+        public class StartDragEventArgs : EventArgs
         {
             public readonly List<TreeNodeObject> parentList;
             public readonly int Index;
@@ -506,7 +504,7 @@ namespace TreeNodeOrdering
             }
         }
 
-        public class DropEventArgs
+        public class DropEventArgs : EventArgs
         {
             public readonly List<TreeNodeObject> dragging;
             public readonly DropType dropType;
