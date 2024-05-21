@@ -33,7 +33,8 @@ namespace TreeNodeOrdering
         internal static TreeNodeCtrl treeNodeCtrl;
         internal static ScrollRect scrollRect;
 
-        static readonly int[] legalKinds = { 0, 1, 3, 5, 7 };
+        // Character: 0 | Item: 1 | Light: 2 | Folder: 3 | Camera: 5 | Text: 7
+        static readonly int[] legalKinds = { 0, 2, 1, 3, 5, 7 };
 
         internal static float spacing = 0;
         internal static float nodeHeight = 0;
