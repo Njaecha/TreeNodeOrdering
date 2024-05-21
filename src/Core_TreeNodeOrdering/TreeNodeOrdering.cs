@@ -1,4 +1,7 @@
-﻿using BepInEx;
+﻿/* NOT USED ANYMORE
+ * SEE TreeNodeOrdering2
+
+using BepInEx;
 using BepInEx.Logging;
 using KKAPI;
 using Studio;
@@ -8,12 +11,11 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using Vectrosity;
-
 namespace TreeNodeOrdering
 {
     [BepInDependency(KoikatuAPI.GUID, KoikatuAPI.VersionConst)]
-    [BepInDependency("com.joan6694.illusionplugins.kkus", BepInDependency.DependencyFlags.SoftDependency)]
-    [BepInDependency("com.jim60105.kk.studiosaveworkspaceorderfix", "20.08.05.0")]
+    [BepInDependency("com.joan6694.illusionplugins.kksus", BepInDependency.DependencyFlags.SoftDependency)]
+    [BepInDependency("com.jim60105.kks.studiosaveworkspaceorderfix", "21.09.28.0")]
     [BepInPlugin(GUID, PluginName, Version)]
     [BepInProcess("CharaStudio")]
     public class TreeNodeOrdering : BaseUnityPlugin
@@ -36,6 +38,7 @@ namespace TreeNodeOrdering
         private int draggedObjectChildDictionaryKey;
         private OCIChar draggedObjectParentCharacter;
         private TreeNodeObject draggedObject;
+        private float draggedObjectYMouseDelta;
 
         //ui values
         private float spacing = 0;
@@ -59,6 +62,8 @@ namespace TreeNodeOrdering
             scrollRect = GameObject.Find("StudioScene/Canvas Object List/Image Bar/Scroll View").GetComponent<ScrollRect>();
         }
 
+        bool doUIDrag = false;
+
         void Update()
         {
             if (treeNodeCtrl != null)
@@ -72,12 +77,13 @@ namespace TreeNodeOrdering
 
                     // check if TreeNodeObject is okay to drag
                     List<int> legalKinds = new List<int>() { 0, 1, 3, 5, 7 }; // Character: 0 | Item: 1 | Folder: 3 | Camera: 5 | Text: 7
-                    ObjectInfo oi = objectInfoFromTreeNode(tu.Item1);
+                    ObjectInfo oi = objectInfoFromTreeNode(tu.treeNode);
                     if (oi == null) return;
                     if (!legalKinds.Contains(oi.kind)) return;
 
-                    draggedObject = tu.Item1;
-                    draggedObjectPosition = tu.Item2;
+                    draggedObject = tu.treeNode;
+                    draggedObjectPosition = tu.listIndex;
+                    draggedObjectYMouseDelta = draggedObject.rectNode.position.y - Input.mousePosition.y;
 
                     // check if dragged object is child of a character
                     if (draggedObject.parent != null && draggedObject.parent.parent != null)
@@ -112,6 +118,7 @@ namespace TreeNodeOrdering
                         draggedObjectParentCharacter = null;
                         dragging = false;
                         scrollRect.vertical = true;
+                        draggedObject = null;
                     }
                     StopAllCoroutines();
                 }
@@ -119,8 +126,15 @@ namespace TreeNodeOrdering
                 if (Input.GetMouseButton(0) && dragging)
                 {
                     drag();
+                    if (doUIDrag) dragUI();
                 }
             }
+        }
+
+        private void dragUI()
+        {
+            if (!dragging || draggedObject is null) return;
+            draggedObject.rectNode.position = new Vector3(draggedObject.rectNode.position.x, Input.mousePosition.y + draggedObjectYMouseDelta, draggedObject.rectNode.position.z);
         }
 
         // the user has click for a certain time to start the dragging process
@@ -151,11 +165,25 @@ namespace TreeNodeOrdering
             return false;
         }
 
+        private class TreeNodeWrapper
+        {
+            public TreeNodeObject treeNode { get; private set; }
+            public int listIndex { get; private set; }
+            public List<TreeNodeObject> list { get; private set; }
+
+            public TreeNodeWrapper(TreeNodeObject treeNode, int listIndex, List<TreeNodeObject> list)
+            {
+                this.treeNode = treeNode;
+                this.listIndex = listIndex;
+                this.list = list;
+            }
+        }
+
         /// <summary>
         /// Get the hovered TreeNodeObject, if any, from all TreeNodeObjects
         /// </summary>
         /// <returns>The TreeNodeObject; its position in the list it is contained in; the list it is contained in</returns>
-        private Tuple<TreeNodeObject, int, List<TreeNodeObject>> getHoveredTreeNodeObject()
+        private TreeNodeWrapper getHoveredTreeNodeObject()
         {
             return getHoveredTreeNodeObject(treeNodeCtrl.m_TreeNodeObject);
         }
@@ -165,23 +193,24 @@ namespace TreeNodeOrdering
         /// </summary>
         /// <param name="treeNodeObjects">List of TreeNodeObject to search within</param>
         /// <returns>The TreeNodeObject; its position in the list it is contained in; the list it is contained in</returns>
-        private Tuple<TreeNodeObject, int, List<TreeNodeObject>> getHoveredTreeNodeObject(List<TreeNodeObject> treeNodeObjects)
+        private TreeNodeWrapper getHoveredTreeNodeObject(List<TreeNodeObject> treeNodeObjects)
         {
             for (int i = 0; i < treeNodeObjects.Count; i++)
             {
                 TreeNodeObject tno = treeNodeObjects[i];
                 if (!tno.isActiveAndEnabled) continue;
+                // if (tno == draggedObject) continue;
                 if (isMouseOverRectTransform(tno.gameObject.GetComponent<RectTransform>()))
                 {
-                    return new Tuple<TreeNodeObject, int, List<TreeNodeObject>>(tno, i, treeNodeObjects);
+                    return new TreeNodeWrapper(tno, i, treeNodeObjects);
                 }
                 if (tno.childCount > 0)
                 {
-                    Tuple<TreeNodeObject, int, List<TreeNodeObject>> tu = getHoveredTreeNodeObject(tno.child);
-                    if (tu.Item1 != null) return tu;
+                    TreeNodeWrapper tu = getHoveredTreeNodeObject(tno.child);
+                    if (tu.treeNode != null) return tu;
                 }
             }
-            return new Tuple<TreeNodeObject, int, List<TreeNodeObject>>(null, 0, null);
+            return new TreeNodeWrapper(null, 0, null);
         }
 
         /// <summary>
@@ -209,11 +238,11 @@ namespace TreeNodeOrdering
         private void drag()
         {
             // get the hoverd TreeNodeObject
-            Tuple<TreeNodeObject, int, List<TreeNodeObject>> tu = getHoveredTreeNodeObject();
-            TreeNodeObject tno = tu.Item1;
+            TreeNodeWrapper tu = getHoveredTreeNodeObject();
+            TreeNodeObject tno = tu.treeNode;
             TreeNodeObject followTno = null;
             TreeNodeObject prevTno = null;
-            int position = tu.Item2;
+            int position = tu.listIndex;
 
             if (tno == null) return;
 
@@ -240,10 +269,10 @@ namespace TreeNodeOrdering
             }
 
             // get TreeNodeObjects above and below the hovered one
-            if (tu.Item3.Count != position + 1)
-                followTno = tu.Item3[position + 1];
+            if (tu.list.Count != position + 1)
+                followTno = tu.list[position + 1];
             if (position > 0)
-                prevTno = tu.Item3[position - 1];
+                prevTno = tu.list[position - 1];
 
             Vector3[] corners = new Vector3[4]; //corners of area which contains the nodes
             treeNodeCtrl.m_ObjectRoot.GetComponent<RectTransform>().GetWorldCorners(corners);
@@ -267,7 +296,7 @@ namespace TreeNodeOrdering
                 }
                 else
                 {
-                    lineY = (int)(getLowestY(tu.Item3) - spacing * scaleFactor / 2);
+                    lineY = (int)(getLowestY(tu.list) - spacing * scaleFactor / 2);
                 }
                 below = true;
             }
@@ -286,9 +315,10 @@ namespace TreeNodeOrdering
 
             // return if lineY value is 0 or below the TreeView
             if (lineY == 0) return;
+
             Vector3[] corners4 = new Vector3[4];
             scrollRect.verticalScrollbar.GetComponent<RectTransform>().GetWorldCorners(corners4);
-            if (lineY < (corners4[0].y - 1 - scaleFactor * spacing / 2)) return;
+            if (lineY < (corners4[0].y - 1 - scaleFactor*spacing/2)) return;
 
             // display insertLine
             if (insertLine == null)
@@ -358,7 +388,7 @@ namespace TreeNodeOrdering
             }
 
             treeNodeCtrl.RefreshHierachy();
-            if (BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey("com.joan6694.illusionplugins.kkus"))
+            if (BepInEx.Bootstrap.Chainloader.PluginInfos.ContainsKey("com.joan6694.illusionplugins.kksus"))
                 HSUS.Features.OptimizeNEO.WorkspaceCtrl_Awake_Patches._treeNodeList = treeNodeCtrl.m_TreeNodeObject;
         }
 
@@ -428,26 +458,5 @@ namespace TreeNodeOrdering
             return Studio.Studio.Instance.dicInfo[tno].objectInfo;
         }
     }
-
-    public class Tuple<T1, T2, T3>
-    {
-        public T1 Item1 { get; private set; }
-        public T2 Item2 { get; private set; }
-        public T3 Item3 { get; private set; }
-        internal Tuple(T1 item1, T2 item2, T3 item3)
-        {
-            Item1 = item1;
-            Item2 = item2;
-            Item3 = item3;
-        }
-    }
-
-    public static class Tuple
-    { 
-        public static Tuple<T1, T2, T3> New<T1, T2, T3>(T1 item1, T2 item2, T3 item3)
-        {
-            var tuple = new Tuple<T1, T2, T3>(item1, item2, item3);
-            return tuple;
-        }
-    }
 }
+*/
