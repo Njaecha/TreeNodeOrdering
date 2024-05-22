@@ -9,6 +9,7 @@
     <Import_RootNamespace>Core_TreeNodeOrdering</Import_RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)TreeNodeOrdering.Patches.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)TreeNodeOrdering.UI.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)TreeNodeOrdering2.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)TreeNodeOrdering.cs" />

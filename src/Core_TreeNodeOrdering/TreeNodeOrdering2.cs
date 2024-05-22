@@ -9,16 +9,17 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
+using HarmonyLib;
 
 namespace TreeNodeOrdering
 {
     [BepInDependency(KoikatuAPI.GUID, KoikatuAPI.VersionConst)]
 #if KKS
     [BepInDependency("com.joan6694.illusionplugins.kksus", BepInDependency.DependencyFlags.SoftDependency)]
-    [BepInDependency("com.jim60105.kks.studiosaveworkspaceorderfix", "21.09.28.0")]
+    [BepInIncompatibility("com.jim60105.kks.studiosaveworkspaceorderfix")]
 #elif KK
     [BepInDependency("com.joan6694.illusionplugins.kkus", BepInDependency.DependencyFlags.SoftDependency)]
-    [BepInDependency("com.jim60105.kk.studiosaveworkspaceorderfix", "20.08.05.0")]
+    [BepInIncompatibility("com.jim60105.kk.studiosaveworkspaceorderfix")]
 #endif
     [BepInPlugin(GUID, PluginName, Version)]
     [BepInProcess("CharaStudio")]
@@ -26,12 +27,13 @@ namespace TreeNodeOrdering
     {
         public const string PluginName = "TreeNodeOrdering";
         public const string GUID = "org.njaecha.plugins.treenodeordering";
-        public const string Version = "2.0.0";
+        public const string Version = "2.0.1";
 
         internal new static ManualLogSource Logger;
 
         internal static TreeNodeCtrl treeNodeCtrl;
         internal static ScrollRect scrollRect;
+        internal static Canvas workspaceWindow;
 
         // Character: 0 | Item: 1 | Light: 2 | Folder: 3 | Camera: 5 | Text: 7
         static readonly int[] legalKinds = { 0, 2, 1, 3, 5, 7 };
@@ -66,7 +68,9 @@ namespace TreeNodeOrdering
             Drag += UpdateUISizeValues;
             Drop += HandleDrop;
 
-            pressTimeConfig = Config.Bind("Values", "P&H Time", 0.3f, new ConfigDescription("The time in second you have to press and hold the TreeNodeObject to start dragging", new AcceptableValueRange<float>(0.1f, 1.0f)));
+            pressTimeConfig = Config.Bind("Values", "P&H Time", 0f, new ConfigDescription("The time in second you have to press and hold the TreeNodeObject to start dragging", new AcceptableValueRange<float>(0, 0.9f)));
+
+            Harmony.CreateAndPatchAll(typeof(TreeNodeOrderingPatch));
         }
 
 
@@ -94,11 +98,12 @@ namespace TreeNodeOrdering
         {
             treeNodeCtrl = Singleton<Studio.Studio>.Instance.treeNodeCtrl;
             scrollRect = GameObject.Find("StudioScene/Canvas Object List/Image Bar/Scroll View").GetComponent<ScrollRect>();
+            workspaceWindow = GameObject.Find("StudioScene/Canvas Object List").GetComponent<Canvas>();
         }
 
         void Update()
         {
-            if (treeNodeCtrl != null) // init okay
+            if (treeNodeCtrl != null && workspaceWindow.isActiveAndEnabled) // init okay and window visible
             {
                 // drag event
                 if (Input.GetMouseButtonDown(0) && treeNodeCtrl.m_ObjectRoot.GetComponent<RectTransform>().ContainsMouse())
@@ -125,13 +130,16 @@ namespace TreeNodeOrdering
             scaleFactor = GameObject.Find("StudioScene/Canvas Object List").GetComponent<Canvas>().scaleFactor;
         }
 
+        int sqrMag = 400;
+
         // the user has click for a certain time to start the dragging process
         IEnumerator moveCheckDelayProcess(float delay, Vector3 initialMousePosition)
         {
             yield return new WaitForSeconds(delay);
-            if (Input.GetMouseButton(0) 
+            while (Event.current.type != EventType.MouseDrag) yield return null;
+            if (Input.GetMouseButton(0)
                 && treeNodeCtrl.m_ObjectRoot.GetComponent<RectTransform>().ContainsMouse() 
-                && (Input.mousePosition - initialMousePosition).sqrMagnitude < 100 // mouse wasnt moved away
+                && (Input.mousePosition - initialMousePosition).sqrMagnitude < sqrMag // mouse wasnt moved away
                 )
             {
                 // fire drag event
@@ -150,6 +158,14 @@ namespace TreeNodeOrdering
 
         private void StartDrag(object sender, StartDragEventArgs e)
         {
+            // clear this stuff if something prevent drop from clearing it...
+            wasOpened.Clear();
+            if (draggingElement != null)
+            {
+                DestroyImmediate(draggingElement);
+                draggingElement = null;
+            }
+
             for (int i = 0; i < e.dragging.Count; i++)
             {
                 TreeNodeObject tno = e.dragging[i];
@@ -236,7 +252,7 @@ namespace TreeNodeOrdering
                         {
                             UI.CurrentDrawType = hoveredDropType = isOnSameLevel ? DropType.InsertAbove : DropType.InsertAndParentAbove;
                         }
-                        else if (!hoveringNeighborAbove && hovered.treeNode.childCount == 0 && Input.mousePosition.y < rect.position.y - (nodeHeight * scaleFactor) / 5 * 4) // lower fifth
+                        else if (!hoveringNeighborAbove && (hovered.treeNode.childCount == 0 || hovered.treeNode.treeState == TreeNodeObject.TreeState.Close) && Input.mousePosition.y < rect.position.y - (nodeHeight * scaleFactor) / 5 * 4) // lower fifth
                         {
                             UI.CurrentDrawType = hoveredDropType = isOnSameLevel ? DropType.InsertBelow : DropType.InsertAndParentBelow;
                         }
