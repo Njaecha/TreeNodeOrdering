@@ -136,7 +136,12 @@ namespace TreeNodeOrdering
         IEnumerator moveCheckDelayProcess(float delay, Vector3 initialMousePosition)
         {
             yield return new WaitForSeconds(delay);
-            while (Event.current.type != EventType.MouseDrag) yield return null;
+            while (Event.current.type != EventType.MouseDrag)
+            {
+                if (Input.GetMouseButtonUp(0)) yield break;
+                yield return null;
+            }
+
             if (Input.GetMouseButton(0)
                 && treeNodeCtrl.m_ObjectRoot.GetComponent<RectTransform>().ContainsMouse() 
                 && (Input.mousePosition - initialMousePosition).sqrMagnitude < sqrMag // mouse wasnt moved away
