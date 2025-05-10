@@ -27,7 +27,7 @@ namespace TreeNodeOrdering
     {
         public const string PluginName = "TreeNodeOrdering";
         public const string GUID = "org.njaecha.plugins.treenodeordering";
-        public const string Version = "2.0.1";
+        public const string Version = "2.1.0";
 
         internal new static ManualLogSource Logger;
 
@@ -90,7 +90,7 @@ namespace TreeNodeOrdering
 
         void OnGUI()
         { 
-            if (rTex != null) GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), rTex);
+            if (rTex) GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), rTex);
         }
 
 
@@ -103,10 +103,10 @@ namespace TreeNodeOrdering
 
         void Update()
         {
-            if (treeNodeCtrl != null && workspaceWindow.isActiveAndEnabled) // init okay and window visible
+            if (treeNodeCtrl && workspaceWindow.isActiveAndEnabled) // init okay and window visible
             {
                 // drag event
-                if (Input.GetMouseButtonDown(0) && treeNodeCtrl.m_ObjectRoot.GetComponent<RectTransform>().ContainsMouse())
+                if (Input.GetMouseButtonDown(0) && (treeNodeCtrl.m_ObjectRoot.transform.parent.transform as RectTransform).ContainsMouse())
                 {
                     StartCoroutine(moveCheckDelayProcess(pressTimeConfig.Value, Input.mousePosition));
                 }
@@ -143,13 +143,13 @@ namespace TreeNodeOrdering
             }
 
             if (Input.GetMouseButton(0)
-                && treeNodeCtrl.m_ObjectRoot.GetComponent<RectTransform>().ContainsMouse() 
-                && (Input.mousePosition - initialMousePosition).sqrMagnitude < sqrMag // mouse wasnt moved away
+                && (treeNodeCtrl.m_ObjectRoot.transform.parent.transform as RectTransform).ContainsMouse() 
+                && (Input.mousePosition - initialMousePosition).sqrMagnitude < sqrMag // mouse wasn't moved away
                 )
             {
                 // fire drag event
                 TreeNodeWrapper hovered = getHoveredTreeNodeObject();
-                if (hovered == null || hovered.treeNode == null || !hovered.treeNode.TryGetObjectInfo(out ObjectInfo info) || !legalKinds.Contains(info.kind)) yield break;
+                if (hovered == null || !hovered.treeNode || !hovered.treeNode.TryGetObjectInfo(out ObjectInfo info) || !legalKinds.Contains(info.kind)) yield break;
                 List<TreeNodeObject> list;
                 if (treeNodeCtrl.selectNode == hovered.treeNode) list = treeNodeCtrl.selectNodes.ToList();
                 else list = new List<TreeNodeObject>() { hovered.treeNode };
@@ -165,7 +165,7 @@ namespace TreeNodeOrdering
         {
             // clear this stuff if something prevent drop from clearing it...
             wasOpened.Clear();
-            if (draggingElement != null)
+            if (draggingElement)
             {
                 DestroyImmediate(draggingElement);
                 draggingElement = null;
@@ -196,6 +196,7 @@ namespace TreeNodeOrdering
                 tno.transform.Find("Select Button")?.gameObject.SetActive(false);
                 tno.transform.Find("Visible")?.gameObject.SetActive(false);
                 tno.transform.Find("Open Tree")?.gameObject.SetActive(false);
+                tno.transform.Find("BS_ScaleChildren")?.gameObject.SetActive(false); // better scaling compat
             }
             // close if has children
 
@@ -219,7 +220,7 @@ namespace TreeNodeOrdering
                 rt.position = new Vector3(Input.mousePosition.x + draggingMouseDelta.x, Input.mousePosition.y + draggingMouseDelta.y, rt.position.z);
                 #region Hover Logic
                 TreeNodeWrapper hovered = getHoveredTreeNodeObject();
-                if (hovered != null && hovered.treeNode != null)
+                if (hovered != null && hovered.treeNode)
                 {
                     RectTransform rect = hovered.treeNode.transform as RectTransform;
                     if (
@@ -248,7 +249,7 @@ namespace TreeNodeOrdering
 
                         hoveredParent = hovered.treeNode.parent;
 
-                        List<TreeNodeObject> list = hoveredParent == null ? treeNodeCtrl.m_TreeNodeObject : hovered.treeNode.parent.child;
+                        List<TreeNodeObject> list = !hoveredParent ? treeNodeCtrl.m_TreeNodeObject : hovered.treeNode.parent.child;
                         bool isOnSameLevel = list.Contains(e.dragging[0]);
                         bool hoveringNeighborAbove = isOnSameLevel && e.Index > 0 && hovered.treeNode == list[e.Index - 1];
                         bool hoveringNeighborBelow = isOnSameLevel && e.Index < list.Count - 1 && hovered.treeNode == list[e.Index + 1];
@@ -261,7 +262,7 @@ namespace TreeNodeOrdering
                         {
                             UI.CurrentDrawType = hoveredDropType = isOnSameLevel ? DropType.InsertBelow : DropType.InsertAndParentBelow;
                         }
-                        else if (!(e.dragging[0].parent != null && hovered.treeNode == e.dragging[0].parent) && hovered.treeNode.enableAddChild) // middle fifths
+                        else if (!(e.dragging[0].parent && hovered.treeNode == e.dragging[0].parent) && hovered.treeNode.enableAddChild) // middle fifths
                         {
                             UI.CurrentDrawType = hoveredDropType = DropType.Parent;
                         }
@@ -293,7 +294,7 @@ namespace TreeNodeOrdering
 
         private void HandleReodering(bool above, DropEventArgs e, TreeNodeObject destination)
         {
-            if (e.newParent == null)
+            if (!e.newParent)
             {
                 treeNodeCtrl.m_TreeNodeObject.Remove(e.dragging[0]);
                 treeNodeCtrl.m_TreeNodeObject.Insert(treeNodeCtrl.m_TreeNodeObject.IndexOf(destination) + (above ? 0 : 1), e.dragging[0]);
@@ -317,7 +318,7 @@ namespace TreeNodeOrdering
                 int? CharaDictKey = null;
                 OCIChar ParentCharacter = null;
 
-                if (!destination.enableChangeParent && destination.parent != null && !destination.parent.enableChangeParent)
+                if (!destination.enableChangeParent && destination.parent && !destination.parent.enableChangeParent)
                 {
                     TreeNodeObject charaTreeNodeObject = destination.parent.parent;
                     if (Studio.Studio.Instance.dicInfo.TryGetValue(charaTreeNodeObject, out ObjectCtrlInfo oci) && oci is OCIChar)
@@ -358,18 +359,18 @@ namespace TreeNodeOrdering
                     }
                 }
                 // parent is characer
-                else if (CharaDictKey.HasValue && ParentCharacter != null && e.dragging[0].TryGetObjectInfo(out ObjectInfo draggingInfo2) && destination.TryGetObjectInfo(out ObjectInfo destinationInfo2))
+                else if (CharaDictKey.HasValue && e.dragging[0].TryGetObjectInfo(out ObjectInfo draggingInfo2) && destination.TryGetObjectInfo(out ObjectInfo destinationInfo2))
                 {
                     OICharInfo chaInfo = ParentCharacter.objectInfo as OICharInfo;
-                    int Key = CharaDictKey.Value;
-                    chaInfo.child[Key].Remove(draggingInfo2);
-                    chaInfo.child[Key].Insert(chaInfo.child[Key].IndexOf(destinationInfo2) + (above ? 0 : 1), draggingInfo2);
+                    int key = CharaDictKey.Value;
+                    chaInfo.child[key].Remove(draggingInfo2);
+                    chaInfo.child[key].Insert(chaInfo.child[key].IndexOf(destinationInfo2) + (above ? 0 : 1), draggingInfo2);
                     for (int i = 1; i < e.dragging.Count; i++)
                     {
                         if (e.dragging[i].TryGetObjectInfo(out ObjectInfo secondary) && e.dragging[i - 1].TryGetObjectInfo(out ObjectInfo secondaryDestinationInfo))
                         {
-                            chaInfo.child[Key].Remove(secondary);
-                            chaInfo.child[Key].Insert(chaInfo.child[Key].IndexOf(secondaryDestinationInfo) + 1, secondary);
+                            chaInfo.child[key].Remove(secondary);
+                            chaInfo.child[key].Insert(chaInfo.child[key].IndexOf(secondaryDestinationInfo) + 1, secondary);
                         }
                     }
                 }
@@ -389,13 +390,14 @@ namespace TreeNodeOrdering
                 node.transform.Find("Select Button")?.gameObject.SetActive(true);
                 node.transform.Find("Visible")?.gameObject.SetActive(true);
                 if (node.childCount > 0) node.transform.Find("Open Tree")?.gameObject.SetActive(true);
+                tno.transform.Find("BS_ScaleChildren")?.gameObject.SetActive(true); // better scaling compat
                 if (wasOpened.ContainsKey(node) && wasOpened[node]) node.SetTreeState(TreeNodeObject.TreeState.Open);
             }
             wasOpened.Clear();
 
             #region handle drop
 
-            List<TreeNodeObject> preList = e.newParent == null ? treeNodeCtrl.m_TreeNodeObject : e.newParent.child;
+            List<TreeNodeObject> preList = !e.newParent ? treeNodeCtrl.m_TreeNodeObject : e.newParent.child;
             TreeNodeObject destination = preList[e.dropIndex];
 
 
@@ -466,14 +468,14 @@ namespace TreeNodeOrdering
                 TreeNodeObject tno = treeNodeObjects[i];
                 if (!tno.isActiveAndEnabled) continue;
                 // if (tno == draggedObject) continue;
-                if (tno.gameObject.GetComponent<RectTransform>().ContainsMouse())
+                if ((tno.gameObject.transform as RectTransform).ContainsMouse() && (treeNodeCtrl.m_ObjectRoot.transform.parent.transform as RectTransform).ContainsMouse())
                 {
                     return new TreeNodeWrapper(tno, i, treeNodeObjects);
                 }
                 if (tno.childCount > 0)
                 {
                     TreeNodeWrapper tu = getHoveredTreeNodeObject(tno.child);
-                    if (tu != null && tu.treeNode != null) return tu;
+                    if (tu != null && tu.treeNode) return tu;
                 }
             }
             return null;
@@ -510,7 +512,7 @@ namespace TreeNodeOrdering
                 TreeNodeObject draggingObject = dragging[0]; // root dragging object
                 
                 // not character and on root level
-                if (draggingObject.parent == null)
+                if (!draggingObject.parent)
                 {
                     parentList = treeNodeCtrl.m_TreeNodeObject;
                     Index = parentList.IndexOf(draggingObject);
