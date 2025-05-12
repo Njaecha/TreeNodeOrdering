@@ -383,14 +383,12 @@ namespace TreeNodeOrdering
 
             UI.RefY = null;
 
-            TreeNodeObject tno = e.dragging[0];
-
             foreach(TreeNodeObject node in e.dragging)
             {
                 node.transform.Find("Select Button")?.gameObject.SetActive(true);
                 node.transform.Find("Visible")?.gameObject.SetActive(true);
                 if (node.childCount > 0) node.transform.Find("Open Tree")?.gameObject.SetActive(true);
-                tno.transform.Find("BS_ScaleChildren")?.gameObject.SetActive(true); // better scaling compat
+                node.transform.Find("BS_ScaleChildren")?.gameObject.SetActive(true); // better scaling compat
                 if (wasOpened.ContainsKey(node) && wasOpened[node]) node.SetTreeState(TreeNodeObject.TreeState.Open);
             }
             wasOpened.Clear();
