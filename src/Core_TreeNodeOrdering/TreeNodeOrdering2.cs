@@ -135,8 +135,10 @@ namespace TreeNodeOrdering
         // the user has click for a certain time to start the dragging process
         IEnumerator moveCheckDelayProcess(float delay, Vector3 initialMousePosition)
         {
-            yield return new WaitForSeconds(delay);
-            while (Event.current.type != EventType.MouseDrag)
+            float startTime = Time.realtimeSinceStartup;
+            float endTime = startTime + delay;
+            
+            while (Time.realtimeSinceStartup < endTime || Event.current.type != EventType.MouseDrag)
             {
                 if (Input.GetMouseButtonUp(0)) yield break;
                 yield return null;
