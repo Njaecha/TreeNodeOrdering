@@ -27,7 +27,7 @@ namespace TreeNodeOrdering
     {
         public const string PluginName = "TreeNodeOrdering";
         public const string GUID = "org.njaecha.plugins.treenodeordering";
-        public const string Version = "2.1.1";
+        public const string Version = "2.1.2";
 
         internal new static ManualLogSource Logger;
 
