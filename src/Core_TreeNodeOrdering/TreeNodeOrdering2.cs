@@ -7,13 +7,20 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using BepInEx.Bootstrap;
 using UnityEngine;
 using UnityEngine.UI;
 using HarmonyLib;
+using KKAPI.Studio;
+using KKAPI.Studio.SaveLoad;
+using KKAPI.Utilities;
 
 namespace TreeNodeOrdering
 {
     [BepInDependency(KoikatuAPI.GUID, KoikatuAPI.VersionConst)]
+    [BepInIncompatibility("org.njaecha.plugins.treenodenaming")]
 #if KKS
     [BepInDependency("com.joan6694.illusionplugins.kksus", BepInDependency.DependencyFlags.SoftDependency)]
     [BepInIncompatibility("com.jim60105.kks.studiosaveworkspaceorderfix")]
@@ -27,7 +34,7 @@ namespace TreeNodeOrdering
     {
         public const string PluginName = "TreeNodeOrdering";
         public const string GUID = "org.njaecha.plugins.treenodeordering";
-        public const string Version = "2.1.2";
+        public const string Version = "3.0.0";
 
         internal new static ManualLogSource Logger;
 
@@ -60,6 +67,23 @@ namespace TreeNodeOrdering
 
         private static ConfigEntry<float> pressTimeConfig;
 
+#region TreeNodeNaming
+
+        internal static bool TreeNodeNamingActive = false;
+        
+        private readonly List<ObjectCtrlInfo> _treeNodeNamingWorkingItems = new List<ObjectCtrlInfo>();
+        private readonly StringBuilder _inputStringBuilder = new StringBuilder();
+
+        private readonly Dictionary<TreeNodeObject, string> _oldTnoNames = new Dictionary<TreeNodeObject, string>();
+        private string _cursor = " ";
+        private int _cursorPosition;
+
+        private static ConfigEntry<KeyboardShortcut> _hotkey;
+
+        internal static bool TreeNodeNamingFixTranslationHelper = false;
+
+#endregion
+
         void Awake()
         {
             TreeNodeOrdering2.Logger = base.Logger;
@@ -69,8 +93,27 @@ namespace TreeNodeOrdering
             Drop += HandleDrop;
 
             pressTimeConfig = Config.Bind("Values", "P&H Time", 0f, new ConfigDescription("The time in second you have to press and hold the TreeNodeObject to start dragging", new AcceptableValueRange<float>(0, 0.9f)));
+            _hotkey = Config.Bind("TreeNodeNaming", "Hotkey",  new KeyboardShortcut(KeyCode.R, KeyCode.LeftShift), "Press this key to rename selected TreeNodeObjects");
+            StudioSaveLoadApi.RegisterExtraBehaviour<TreeNodeNamingSceneController>(GUID);
 
+            StudioContextMenus.AddWorkspaceContextMenuItem("Rename", OnRename,
+                StudioContextMenuOrder.Default,
+                RenameContextMenuCheckState);
+            
             Harmony.CreateAndPatchAll(typeof(TreeNodeOrderingPatch));
+            if (Chainloader.PluginInfos.ContainsKey(TranslationHelperPlugin.TranslationHelper.GUID))
+            {
+                TreeNodeNamingFixTranslationHelper = true;
+            }
+        }
+
+        private static GlobalContextMenu.Entry.EntryState RenameContextMenuCheckState(WorkspaceNodeClickedEventArgs args)
+        {
+            if (!args.ClickedInstance.enableDelete || !args.ClickedInstance.enableChangeParent)
+                return GlobalContextMenu.Entry.EntryState.Hidden;
+            return TreeNodeNamingActive
+                ? GlobalContextMenu.Entry.EntryState.Disabled
+                : GlobalContextMenu.Entry.EntryState.Normal;
         }
 
 
@@ -91,6 +134,71 @@ namespace TreeNodeOrdering
         void OnGUI()
         { 
             if (rTex) GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), rTex);
+
+            #region TreeNodeNaming
+
+            if (TreeNodeNamingActive)
+            {
+                if (Event.current.type == EventType.KeyDown && Event.current.keyCode != KeyCode.None)
+                {
+                    // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault
+                    switch (Event.current.keyCode)
+                    {
+                        case KeyCode.Escape:
+                            CancelInvoke();
+                            foreach (TreeNodeObject tno in _oldTnoNames.Keys)
+                                tno.textName = _oldTnoNames[tno];
+                            TreeNodeNamingActive = false;
+                            break;
+                        case KeyCode.Return:
+                            CancelInvoke();
+                            renameCurrentItems(_inputStringBuilder.ToString(), true);
+                            TreeNodeNamingActive = false;
+                            break;
+                        case KeyCode.Backspace:
+                            if (_inputStringBuilder.Length > 0 && _cursorPosition > 0)
+                            {
+                                _inputStringBuilder.Remove(_cursorPosition - 1, 1);
+                                _cursorPosition--;
+                                renameCurrentItems(_inputStringBuilder.ToString().Insert(_cursorPosition, _cursor));
+                            }
+                            break;
+                        case KeyCode.Delete:
+                            if (_inputStringBuilder.Length > 0 && _cursorPosition != _inputStringBuilder.Length)
+                            {
+                                _inputStringBuilder.Remove(_cursorPosition, 1);
+                                renameCurrentItems(_inputStringBuilder.ToString().Insert(_cursorPosition, _cursor));
+                            }
+                            break;
+                        case KeyCode.LeftArrow:
+                            if (_cursorPosition > 0)
+                            {
+                                _cursorPosition--;
+                                renameCurrentItems(_inputStringBuilder.ToString().Insert(_cursorPosition, _cursor));
+                            }
+                            break;
+                        case KeyCode.RightArrow:
+                            if (_cursorPosition < _inputStringBuilder.Length)
+                            {
+                                _cursorPosition++;
+                                renameCurrentItems(_inputStringBuilder.ToString().Insert(_cursorPosition, _cursor));
+                            }
+                            break;
+                        default:
+                            int a = _inputStringBuilder.Length;
+                            _inputStringBuilder.Insert(_cursorPosition, Input.inputString);
+                            if (a != _inputStringBuilder.Length)
+                            {
+                                _cursorPosition = _cursorPosition + Input.inputString.Length;
+                                renameCurrentItems(_inputStringBuilder.ToString().Insert(_cursorPosition, _cursor));
+                            }
+                            break;
+                    }
+                }
+                Input.ResetInputAxes();
+            }
+
+            #endregion
         }
 
 
@@ -100,6 +208,90 @@ namespace TreeNodeOrdering
             scrollRect = GameObject.Find("StudioScene/Canvas Object List/Image Bar/Scroll View").GetComponent<ScrollRect>();
             workspaceWindow = GameObject.Find("StudioScene/Canvas Object List").GetComponent<Canvas>();
         }
+
+#region TreeNodeNaming
+
+        public void renameCurrentItems(string name, bool doPostProcessing = false)
+        {
+            var counter = 0;
+            foreach (ObjectCtrlInfo oci in _treeNodeNamingWorkingItems)
+            {
+                string thisName = name;
+                if (doPostProcessing)
+                {
+                    var baseReplacement = counter.ToString();
+                    thisName = Regex.Replace(name, @"(?<!\\)#{1,}", match =>
+                    {
+                        int len = match.Length;
+                        return baseReplacement.PadLeft(len, '0');
+                    }).Replace("\\#", "#");
+                }
+                renameItem(oci, thisName);
+                counter++;
+            }
+        }
+        public static void renameItem(ObjectCtrlInfo oci, string name)
+        {
+            switch (oci.kind)
+            {
+                case 3:
+                    ((OCIFolder)oci).name = name;
+                    break;
+                case 4:
+                    ((OCIRoute)oci).name = name;
+                    break;
+                case 5:
+                    ((OCICamera)oci).name = name;
+                    break;
+                default:
+                    oci.treeNodeObject.textName = name;
+                    break;
+            }
+        }
+
+        public static IEnumerator RenameDelayed(ObjectCtrlInfo oci, string name)
+        {
+            yield return null;
+            renameItem(oci, name);
+        }
+        
+        private void CursorBlinking()
+        {
+            if (TreeNodeNamingActive)
+            {
+                if (_cursor == "¦") _cursor = "|";
+                else _cursor = "¦";
+                renameCurrentItems(_inputStringBuilder.ToString().Insert(_cursorPosition, _cursor));
+            }
+        }
+        
+        private void OnRename(WorkspaceNodeClickedEventArgs args)
+        {
+            # if KKS
+            _inputStringBuilder.Clear();
+            # else
+            _inputStringBuilder.Remove(0, _inputStringBuilder.Length);
+            #endif
+            _inputStringBuilder.Append(args.ClickedInstance.textName);
+            _cursorPosition = _inputStringBuilder.Length;
+            _oldTnoNames.Clear();
+            List<ObjectCtrlInfo> ctrlInfos = args.GetSelectedObjects().ToList();
+            foreach (ObjectCtrlInfo oci in ctrlInfos)
+            {
+                _oldTnoNames[oci.treeNodeObject] = oci.treeNodeObject.textName;
+            }
+            _treeNodeNamingWorkingItems.Clear();
+            if (args.ClickedInstance.TryGetObjectCtrlInfo(out ObjectCtrlInfo clickedCtrlInfo))
+            {
+                if (!ctrlInfos.Contains(clickedCtrlInfo)) ctrlInfos.Insert(0,clickedCtrlInfo);
+            }
+            _treeNodeNamingWorkingItems.AddRange(ctrlInfos);
+
+            TreeNodeNamingActive = true;
+            InvokeRepeating(nameof(CursorBlinking), 0, 0.5f);
+        }
+
+#endregion
 
         void Update()
         {
@@ -121,6 +313,18 @@ namespace TreeNodeOrdering
                     }
                 }
             }
+
+            #region TreeNodeNaming
+
+            if (_hotkey.Value.IsDown())
+            {
+                if (!treeNodeCtrl.selectNode ||
+                    (!treeNodeCtrl.selectNode.enableDelete && !treeNodeCtrl.selectNode.enableChangeParent)) return;
+                WorkspaceNodeClickedEventArgs args = new WorkspaceNodeClickedEventArgs(treeNodeCtrl.selectNode);
+                OnRename(args);
+            }
+
+            #endregion
         }
 
         public void UpdateUISizeValues(object sender, StartDragEventArgs e)
@@ -162,7 +366,7 @@ namespace TreeNodeOrdering
         private static GameObject draggingElement = null;
         private Vector2 draggingMouseDelta = Vector2.zero;
         private Dictionary<TreeNodeObject, bool> wasOpened = new Dictionary<TreeNodeObject, bool>();
-
+        
         private void StartDrag(object sender, StartDragEventArgs e)
         {
             // clear this stuff if something prevent drop from clearing it...
