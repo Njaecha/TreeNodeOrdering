@@ -94,7 +94,7 @@ namespace TreeNodeOrdering
 
             pressTimeConfig = Config.Bind("Values", "P&H Time", 0f, new ConfigDescription("The time in second you have to press and hold the TreeNodeObject to start dragging", new AcceptableValueRange<float>(0, 0.9f)));
             _hotkey = Config.Bind("TreeNodeNaming", "Hotkey",  new KeyboardShortcut(KeyCode.R, KeyCode.LeftShift), "Press this key to rename selected TreeNodeObjects");
-            StudioSaveLoadApi.RegisterExtraBehaviour<TreeNodeNamingSceneController>(GUID);
+            StudioSaveLoadApi.RegisterExtraBehaviour<TreeNodeNamingSceneController>("org.njaecha.plugins.treenodenaming");
 
             StudioContextMenus.AddWorkspaceContextMenuItem("Rename", OnRename,
                 StudioContextMenuOrder.Default,
