@@ -220,7 +220,7 @@ namespace TreeNodeOrdering
                 if (doPostProcessing)
                 {
                     var baseReplacement = counter.ToString();
-                    thisName = Regex.Replace(name, @"(?<!\\)#{1,}", match =>
+                    thisName = Regex.Replace(name, @"(?<=\s(?:\\#)?)#+(?!:(?:\s|$))", match =>
                     {
                         int len = match.Length;
                         return baseReplacement.PadLeft(len, '0');
